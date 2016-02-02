@@ -245,8 +245,6 @@ newClusterWeights = do
     params <- ask
     let tc = fromIntegral $ topicCount params
         lpnew = log $ (alpha params) / (alpha params + tc - 1)
-        tcs = topicCounts params
-        cvalue = computeC params tcs
     return $ Map.foldWithKey (\key s acc ->
             Map.insert key (logClusterProb params s Map.empty + lpnew) acc
         ) Map.empty $ samples params
