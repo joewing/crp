@@ -1,4 +1,8 @@
-module CRP where
+module CRP (
+        create,
+        add,
+        run
+    ) where
 
 import Control.Monad.State
 import Control.Monad.Reader
@@ -59,9 +63,25 @@ create alpha beta = ModelParams {
 }
 
 -- Add a sample to the model.
-addSample :: ModelParams -> Int -> Sample -> ModelParams
-addSample params key sample =
+add :: ModelParams -> Int -> Sample -> ModelParams
+add params key sample =
     params { samples = Map.insert key sample $ samples params }
+
+-- Run the model.
+run :: ModelParams -> Int -> ModelData
+run params iters =
+    let params' = params { topicCount = countTopics $ samples params } in
+    fst $ runState (runReaderT runner params') ModelData {
+        clusters = Map.empty,
+        mapping = Map.empty,
+        generator = mkStdGen $ seed params'
+    }
+    where
+        runner = do
+            p <- ask
+            mapM_ (insertSample 0) (Map.keys $ samples p)
+            best <- get
+            foldM clusterIter best [1 .. iters]
 
 -- Map an operation over a sparse vector.
 vecMap :: (Eq a, Num a) => (a -> a -> a) -> SparseFunction2 a
@@ -102,7 +122,7 @@ clusterRemove cid sid = do
     d <- get
     p <- ask
     let d2 = clusterApply vecSubtract p d cid sid
-    put $ d2 { mapping = Map.delete sid (mapping d2) }
+    put $ d2 { mapping = Map.delete sid $ mapping d2 }
 
 -- Insert a sample to the specified cluster.
 -- This assumes that the sample is not inserted somewhere else.
@@ -111,33 +131,15 @@ insertSample cid sid = do
     d <- get
     p <- ask
     let d2 = clusterApply vecAdd p d cid sid
-    put $ d2 { mapping = Map.insert sid cid (mapping d2) }
+    put $ d2 { mapping = Map.insert sid cid $ mapping d2 }
 
 -- Remove a sample from its current cluster.
 removeSample :: Int -> CRPState ()
 removeSample sid = do
-    d <- get
-    case Map.lookup sid $ mapping d of
+    m <- gets mapping
+    case Map.lookup sid m of
         Just oc -> clusterRemove oc sid
         Nothing -> return ()
-
--- Run the model.
-run :: ModelParams -> Int -> ModelData
-run params iters =
-    let params' = params { topicCount = countTopics $ samples params }
-        d = ModelData {
-            clusters = Map.empty,
-            mapping = Map.empty,
-            generator = mkStdGen $ seed params
-        }
-    in
-    fst $ runState (runReaderT runner params') d
-    where
-        runner = do
-            p <- ask
-            mapM_ (\i -> insertSample 0 i) (Map.keys $ samples p)
-            best <- get
-            foldM clusterIter best [1 .. iters]
 
 -- Select a sample to move.
 selectSample :: CRPState Int
@@ -204,10 +206,11 @@ clusterSizeCounts :: ModelParams -> ModelData -> SparseVector Int
 clusterSizeCounts params = createHistogram . Map.elems . clusterSizes params
 
 -- Determine the probability of the current clustering.
-logProbClustering :: ModelParams -> ModelData -> Double
-logProbClustering params d =
-    let counts = clusterSizeCounts params d in
-    Map.foldWithKey update 0.0 counts
+logProbClustering :: CRPState Double
+logProbClustering = do
+    params <- ask
+    d <- get
+    return $ Map.foldWithKey update 0.0 $ clusterSizeCounts params d
     where
         update size count partial =
             let fcount = fromIntegral count
@@ -223,7 +226,7 @@ logPostProb d = do
         cc = fromIntegral $ Map.size cs
         likelihood = sum $ map (\c -> computeC params c) $ Map.elems cs
         part = cc * (logGamma b * tc - logGamma (b * tc))
-        lpc = logProbClustering params d
+    lpc <- logProbClustering
     return $ (likelihood - part) + lpc
 
 -- Determine the probability of assignment to each table.
@@ -231,8 +234,8 @@ assignmentProbs :: Sample -> CRPState (SparseVector Double)
 assignmentProbs s = do
     params <- ask
     d <- get
-    let weights = clusterWeights params d s
-        maxWeight = maximum $ Map.elems weights
+    weights <- clusterWeights s
+    let maxWeight = maximum $ Map.elems weights
         unlogged = Map.map (\x -> exp $ x - maxWeight) weights
         total = sum $ Map.elems unlogged
     return $ Map.map (/ total) unlogged
@@ -240,22 +243,26 @@ assignmentProbs s = do
 -- Determine the weight of each cluster for a sample.
 -- This assumes that the model data does not include the sample.
 -- This includes a slot for the new cluster.
-clusterWeights :: ModelParams -> ModelData -> Sample -> SparseVector Double
-clusterWeights params d s =
-    let newClusterId = head [k | k <- [0 .. ] \\ Map.keys (clusters d)]
+clusterWeights :: Sample -> CRPState (SparseVector Double)
+clusterWeights s = do
+    params <- ask
+    d <- get
+    let cs = clusters d
+        newClusterId = head [k | k <- [0 .. ] \\ Map.keys cs]
         tc = fromIntegral $ topicCount params
         lpnew = log $ (alpha params) / (alpha params + tc - 1)
         newClusterProb = logClusterProb params s Map.empty + lpnew
-        existing = Map.mapWithKey weight (clusters d) in
-    Map.insert newClusterId newClusterProb existing
+    existing <- mapM weight (Map.assocs cs)
+    return $ Map.insert newClusterId newClusterProb $ Map.fromAscList existing
     where
-        count = fromIntegral $ Map.size (clusters d)
-        sizes = clusterSizes params d
-        tc = fromIntegral $ topicCount params
-        weight cid c =
-            let size = fromIntegral $ Map.findWithDefault 0 cid sizes
-                mixing = size / (alpha params + tc - 1) in
-            logClusterProb params s c + log mixing
+        weight (cid, c) = do
+            params <- ask
+            d <- get
+            let sizes = clusterSizes params d
+                size = fromIntegral $ Map.findWithDefault 0 cid sizes
+                tc = fromIntegral $ topicCount params
+                mixing = size / (alpha params + tc - 1)
+            return $ (cid, logClusterProb params s c + log mixing)
 
 -- Determine the log of the probability of a sample being in a cluster.
 logClusterProb :: ModelParams -> Sample -> Cluster -> Double
