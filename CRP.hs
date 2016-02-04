@@ -1,7 +1,5 @@
 module CRP where
 
-import Debug.Trace(trace)
-
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Map as Map
@@ -185,7 +183,7 @@ clusterIter best _ = do
     insertSample cid sid
     pBest <- logPostProb best
     pCurrent <- get >>= logPostProb
-    trace ("best: " ++ show pBest ++ " current " ++ show pCurrent) $ if pCurrent > pBest then get >>= return
+    if pCurrent > pBest then get >>= return
     else return best
 
 -- Create a histogram.
@@ -231,23 +229,13 @@ logPostProb d = do
 -- Determine the probability of assignment to each table.
 assignmentProbs :: Sample -> CRPState (SparseVector Double)
 assignmentProbs s = do
-    newWeights <- newClusterWeights
     params <- ask
     d <- get
-    let weights = vecAdd (clusterWeights params d s) newWeights
+    let weights = clusterWeights params d s
         maxWeight = maximum $ Map.elems weights
         unlogged = Map.map (\x -> exp $ x - maxWeight) weights
         total = sum $ Map.elems unlogged
-    return $ Map.map (\x -> x / total) unlogged
-
-newClusterWeights :: CRPState (SparseVector Double)
-newClusterWeights = do
-    params <- ask
-    let tc = fromIntegral $ topicCount params
-        lpnew = log $ (alpha params) / (alpha params + tc - 1)
-    return $ Map.foldWithKey (\key s acc ->
-            Map.insert key (logClusterProb params s Map.empty + lpnew) acc
-        ) Map.empty $ samples params
+    return $ Map.map (/ total) unlogged
 
 -- Determine the weight of each cluster for a sample.
 -- This assumes that the model data does not include the sample.
@@ -255,9 +243,11 @@ newClusterWeights = do
 clusterWeights :: ModelParams -> ModelData -> Sample -> SparseVector Double
 clusterWeights params d s =
     let newClusterId = head [k | k <- [0 .. ] \\ Map.keys (clusters d)]
-        newClusterProb = (alpha params) / (alpha params + count)
+        tc = fromIntegral $ topicCount params
+        lpnew = log $ (alpha params) / (alpha params + tc - 1)
+        newClusterProb = logClusterProb params s Map.empty + lpnew
         existing = Map.mapWithKey weight (clusters d) in
-    Map.insert newClusterId (log newClusterProb) existing
+    Map.insert newClusterId newClusterProb existing
     where
         count = fromIntegral $ Map.size (clusters d)
         sizes = clusterSizes params d

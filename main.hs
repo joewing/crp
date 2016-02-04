@@ -18,8 +18,8 @@ samples = [
 
 main :: IO ()
 main = do
-    let alpha = 1
-    let beta = 5
+    let alpha = 5
+    let beta = 1
     let crp = create alpha beta
     let crp' = foldl (\a (i, s) -> addSample a i s) crp samples
     let d = run crp' 100
