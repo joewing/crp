@@ -1,26 +1,25 @@
 
 module Main where
 
-import CRP (create, run, add)
+import CRP (ModelParams, create, run, add)
+import CSVFileReader
 import qualified Data.Map as Map
 
-samples :: [(Int, Map.Map Int Int)]
-samples = [
-        --                red     green   white    brown
-        (1, Map.fromList [(1, 2), (2, 2), (3, 3), (4, 3)]), -- Normal
-        (2, Map.fromList [(1, 3), (2, 2), (3, 3), (4, 3)]), -- Normal
-        (3, Map.fromList [(1, 5), (2, 4), (3, 0), (4, 0)]), -- Christmas
-        (4, Map.fromList [(1, 4), (2, 5), (3, 0), (4, 0)]), -- Christmas
-        (5, Map.fromList [(1, 4), (2, 0), (3, 5), (4, 0)]), -- Fourth
-        (6, Map.fromList [(1, 5), (2, 0), (3, 4), (4, 0)])  -- Fourth
-    ]
-
+readSamples :: ModelParams -> String -> IO ModelParams
+readSamples params filename = do
+    lines <- readCSV filename
+    return $ helper params 1 lines
+    where
+        helper params i [] = params
+        helper params i (x:xs) =
+            let row = Map.fromList $ zip [1 .. ] (map read x) in
+            helper (add params i row) (i + 1) xs
 
 main :: IO ()
 main = do
     let alpha = 5
     let beta = 1
     let crp = create alpha beta
-    let crp' = foldl (\a (i, s) -> add a i s) crp samples
+    crp' <- readSamples crp "samples.csv"
     let d = run crp' 100
     putStrLn $ show $ d

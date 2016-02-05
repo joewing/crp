@@ -1,4 +1,5 @@
 module CRP (
+        ModelParams,
         create,
         add,
         run
