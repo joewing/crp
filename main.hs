@@ -7,7 +7,7 @@ import qualified Data.Map as Map
 
 readSamples :: ModelParams -> String -> IO ModelParams
 readSamples params filename = do
-    lines <- readCSV filename
+    (header:lines) <- readCSV filename
     return $ helper params lines
     where
         helper params [] = params
