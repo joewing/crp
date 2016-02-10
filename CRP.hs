@@ -23,13 +23,13 @@ data ModelParams = ModelParams {
     seed        :: Int,
     alpha       :: Double,
     beta        :: Double,
-    samples     :: Map.Map Int Sample,  -- sample -> (item -> count)
+    samples     :: Map.Map String Sample,   -- sample -> (item -> count)
     topicCount  :: Int
 }
 
 data ModelData = ModelData {
     clusters    :: Map.Map Int Cluster,     -- cluster -> (item -> count)
-    mapping     :: Map.Map Int Int,         -- sample -> cluster
+    mapping     :: Map.Map String Int,      -- sample -> cluster
     generator   :: StdGen
 }
 
@@ -37,16 +37,16 @@ type CRPState a = ReaderT ModelParams (State ModelData) a
 
 instance Show ModelData where
     show d = Map.foldWithKey (\k v acc ->
-            acc ++ show k ++ ": " ++ show v ++ "\n"
+            acc ++ k ++ ": " ++ show v ++ "\n"
         ) "" $ mapping d
 
-topics :: SparseVector Sample -> Set.Set Int
+topics :: Map.Map String Sample -> Set.Set Int
 topics = Map.fold sampleTopics Set.empty
     where
         sampleTopics sample acc =
             Set.union acc $ Map.keysSet $ sample
 
-countTopics :: SparseVector Sample -> Int
+countTopics :: Map.Map String Sample -> Int
 countTopics = Set.size . topics
 
 -- Get the number of occurances of each topic.
@@ -64,7 +64,7 @@ create alpha beta = ModelParams {
 }
 
 -- Add a sample to the model.
-add :: ModelParams -> Int -> Sample -> ModelParams
+add :: ModelParams -> String -> Sample -> ModelParams
 add params key sample =
     params { samples = Map.insert key sample $ samples params }
 
@@ -106,7 +106,7 @@ vecSubtract = vecMap (-)
 
 -- Apply a function to a cluster.
 clusterApply :: SparseFunction2 Int -> ModelParams
-                -> ModelData -> Int -> Int -> ModelData
+                -> ModelData -> Int -> String -> ModelData
 clusterApply f p d c s =
     let sample = Map.findWithDefault Map.empty s $ samples p
         oldClusters = clusters d
@@ -118,7 +118,7 @@ clusterApply f p d c s =
         d { clusters = Map.delete c oldClusters }
 
 -- Remove a sample from a cluster.
-clusterRemove :: Int -> Int -> CRPState ()
+clusterRemove :: Int -> String -> CRPState ()
 clusterRemove cid sid = do
     d <- get
     p <- ask
@@ -127,7 +127,7 @@ clusterRemove cid sid = do
 
 -- Insert a sample to the specified cluster.
 -- This assumes that the sample is not inserted somewhere else.
-insertSample :: Int -> Int -> CRPState ()
+insertSample :: Int -> String -> CRPState ()
 insertSample cid sid = do
     d <- get
     p <- ask
@@ -135,7 +135,7 @@ insertSample cid sid = do
     put $ d2 { mapping = Map.insert sid cid $ mapping d2 }
 
 -- Remove a sample from its current cluster.
-removeSample :: Int -> CRPState ()
+removeSample :: String -> CRPState ()
 removeSample sid = do
     m <- gets mapping
     case Map.lookup sid m of
@@ -143,7 +143,7 @@ removeSample sid = do
         Nothing -> return ()
 
 -- Select a sample to move.
-selectSample :: CRPState Int
+selectSample :: CRPState String
 selectSample = do
     p <- ask
     d <- get
@@ -162,7 +162,7 @@ drawDouble = do
     return value
 
 -- Select a new cluster for a sample.
-selectCluster :: Int -> CRPState Int
+selectCluster :: String -> CRPState Int
 selectCluster sid = do
     p <- ask
     draw <- drawDouble
@@ -177,7 +177,7 @@ selectCluster sid = do
             else if found < 0 then (found, newProb)         -- Not found yet
             else (found, total)                             -- Already found
 
--- Perform a sinle iteration.
+-- Perform one iteration.
 clusterIter :: ModelData -> Int -> CRPState ModelData
 clusterIter best _ = do
     sid <- selectSample
