@@ -1,3 +1,6 @@
+
+{-# LANGUAGE FlexibleContexts #-}
+
 module CRP (
         ModelParams,
         create,
