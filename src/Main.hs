@@ -38,7 +38,7 @@ main = do
         putStrLn "options:"
         putStrLn "  -alpha <value:5>"
         putStrLn "  -beta <value:1>"
-        putStrLn "  -iterations <value:100>"
+        putStrLn "  -iters <value:100>"
     else do
         let crp = create alpha beta
         crp' <- readSamples crp file

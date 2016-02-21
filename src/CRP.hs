@@ -26,12 +26,12 @@ data ModelParams = ModelParams {
     seed        :: Int,
     alpha       :: Double,
     beta        :: Double,
-    samples     :: Map.Map String Sample,   -- sample -> (item -> count)
+    samples     :: Map.Map String Sample,   -- sample -> item -> count
     topicCount  :: Int
 }
 
 data ModelData = ModelData {
-    clusters    :: Map.Map Int Cluster,     -- cluster -> (item -> count)
+    clusters    :: Map.Map Int Cluster,     -- cluster -> item -> count
     mapping     :: Map.Map String Int,      -- sample -> cluster
     generator   :: StdGen
 }
@@ -148,11 +148,11 @@ removeSample sid = do
 -- Select a sample to move.
 selectSample :: CRPState String
 selectSample = do
-    p <- ask
+    s <- asks samples
     d <- get
-    let range = (0, (Map.size $ samples p) - 1)
+    let range = (0, (Map.size s) - 1)
     let (index, g) = randomR range $ generator d
-    let sid = Map.keys (samples p) !! index
+    let sid = Map.keys s !! index
     put $ d { generator = g }
     return sid
 
@@ -161,7 +161,7 @@ drawDouble :: CRPState Double
 drawDouble = do
     d <- get
     let (value, g) = random $ generator d
-    put $ d { generator = g}
+    put $ d { generator = g }
     return value
 
 -- Select a new cluster for a sample.
